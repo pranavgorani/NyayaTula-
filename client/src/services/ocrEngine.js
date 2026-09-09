@@ -73,7 +73,7 @@ export function parseDeclarationsFromText(rawText) {
   }
   
   // MRP Inclusive
-  if (/inclusive of all taxes|incl\. of all taxes/i.test(fullText)) {
+  if (/incl(?:usive)?\.?\s*of\s*all\s*taxes/i.test(fullText)) {
     result.mrpInclusiveText = true;
   }
 

@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import Product from '../models/Product.js';
 import ComplianceReport from '../models/ComplianceReport.js';
 import { runComplianceCheck } from '../services/complianceEngine.js';
+import { analyzePackageImage } from '../services/geminiService.js';
 import { isDbConnected, jsonStore } from '../db/index.js';
 
 const router = express.Router();

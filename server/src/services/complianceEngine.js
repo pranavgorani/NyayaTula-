@@ -45,12 +45,17 @@ export const runComplianceCheck = (declarations) => {
     {
       ruleId: 'RULE_004',
       ruleName: 'MRP Inclusive Text',
-      ruleReference: 'Rule 6(1)(c)',
-      category: 'format',
+      ruleReference: 'Rule 6(1)(e)',
+      category: 'mandatory_declaration',
       severity: 'major',
       check: (dec) => {
-        const text = dec.mrpInclusiveText || dec.mrp || '';
-        const passed = /inclusive of all taxes|incl/i.test(text.toString());
+        let passed = false;
+        if (typeof dec.mrpInclusiveText === 'boolean') {
+          passed = dec.mrpInclusiveText;
+        } else {
+          const text = dec.mrpInclusiveText || dec.mrp || '';
+          passed = /incl(?:usive)?\.?\s*of\s*all\s*taxes/i.test(text.toString());
+        }
         return {
           passed,
           details: passed ? 'Tax inclusion stated' : 'Missing "inclusive of all taxes" statement'
