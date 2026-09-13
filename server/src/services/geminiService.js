@@ -1,8 +1,4 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import dotenv from 'dotenv';
-dotenv.config();
-
-const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI() : null;
 
 const SYSTEM_INSTRUCTION = `You are an expert Compliance Inspector AI for the Government of India, specializing in the Legal Metrology (Packaged Commodities) Rules, 2011. 
 
@@ -11,9 +7,13 @@ Your task is to analyze an uploaded image of a packaged commodity label, extract
 INSTRUCTIONS:
 1. Scan the provided image carefully and extract all visible text.
 2. Search for the 6 Mandatory Declarations.
-3. Check for correctness, completeness, and placement. 
-4. Flag any missing, misleading, or non-standard declarations.
-5. Evaluate readability (contrast, blurriness, and estimated relative font size).
+3. Check for correctness, completeness, and placement (declarations must be grouped together on the Principal Display Panel, not scattered or hidden on flaps).
+4. Flag any missing or non-standard declarations.
+5. Anomaly Detection: Flag misleading text (e.g., "Free" claims without explicit conditions, or exaggerated fonts for MRP while other text is tiny).
+6. Font Size & Readability Analysis: 
+   - Check against Rule 7 minimum font heights (e.g., Net Qty <= 50g/ml: 1mm; 50-200g/ml: 2mm; 200g-1kg: 4mm; >1kg: 6mm).
+   - Since you cannot measure absolute millimeters without a physical reference, perform a relative geometric analysis. Flag if the mandatory declarations appear disproportionately small compared to the brand name or graphics, or if they appear to violate the minimum rules relative to the package size.
+   - Evaluate readability (contrast, blurriness, italicized/decorative fonts that reduce legibility).
 
 MANDATORY DECLARATIONS TO CHECK:
 1. Manufacturer / Packer / Importer: Full name and complete physical address.
@@ -24,10 +24,11 @@ MANDATORY DECLARATIONS TO CHECK:
 6. Consumer Care: Must include at least a Telephone Number/Helpline AND an Email Address.`;
 
 export async function analyzePackageImage(base64Image, mimeType = 'image/jpeg') {
-  if (!ai) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not configured in the backend .env file. AI Scanner is disabled.');
   }
 
+  const ai = new GoogleGenAI();
   const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
 
   try {
@@ -69,9 +70,11 @@ export async function analyzePackageImage(base64Image, mimeType = 'image/jpeg') 
             missing_declarations: { type: Type.ARRAY, items: { type: Type.STRING } },
             violations_found: { type: Type.ARRAY, items: { type: Type.STRING } },
             readability_assessment: { type: Type.STRING },
+            font_size_compliance_assessment: { type: Type.STRING },
+            placement_and_anomalies_detected: { type: Type.STRING },
             tampering_or_obscuration_detected: { type: Type.BOOLEAN }
           },
-          required: ['compliance_status', 'auto_fill_data', 'missing_declarations', 'violations_found', 'readability_assessment', 'tampering_or_obscuration_detected']
+          required: ['compliance_status', 'auto_fill_data', 'missing_declarations', 'violations_found', 'readability_assessment', 'font_size_compliance_assessment', 'placement_and_anomalies_detected', 'tampering_or_obscuration_detected']
         }
       }
     });

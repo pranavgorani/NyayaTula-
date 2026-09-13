@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Activity, AlertTriangle, CheckCircle, Package } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle, Package, Download } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const Analytics = () => {
   // Mock data for charts
@@ -37,6 +38,29 @@ const Analytics = () => {
     { name: 'ABC Foods', scanned: 112, violations: 18, rate: '83%', issue: 'No Net Quantity Unit' },
   ];
 
+  const handleExportCSV = () => {
+    let csv = 'Manufacturer,Scanned,Violations,Compliance Rate,Most Common Issue\n';
+    topOffenders.forEach(o => {
+      csv += `"${o.name}",${o.scanned},${o.violations},"${o.rate}","${o.issue}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'NyayaTula_Analytics_Report.csv';
+    link.click();
+    toast.success('Analytics CSV exported!');
+  };
+
+  const handleExportDocx = () => {
+    const dataStr = "NyayaTula Analytics Summary\n\n" + JSON.stringify(topOffenders, null, 2);
+    const blob = new Blob([dataStr], { type: 'text/plain;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'NyayaTula_Analytics_Report.doc';
+    link.click();
+    toast.success('Analytics Document exported!');
+  };
+
   const StatCard = ({ title, value, icon: Icon, colorClass, subtitle }) => (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
       <div className="flex items-center justify-between mb-4">
@@ -54,9 +78,19 @@ const Analytics = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 pb-20">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Analytics & Insights</h1>
-        <p className="text-slate-500 text-sm">Deep dive into compliance data and trends</p>
+      <div className="mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Analytics & Insights</h1>
+          <p className="text-slate-500 text-sm">Deep dive into compliance data and trends</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={handleExportCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg text-sm font-semibold transition-colors">
+            <Download size={16} /> Excel (CSV)
+          </button>
+          <button onClick={handleExportDocx} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 rounded-lg text-sm font-semibold transition-colors">
+            <Download size={16} /> Word (DOC)
+          </button>
+        </div>
       </div>
 
       {/* Stats Row */}

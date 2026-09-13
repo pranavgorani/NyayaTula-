@@ -13,10 +13,10 @@ import productRoutes from './routes/products.js';
 import complianceRoutes from './routes/compliance.js';
 import dashboardRoutes from './routes/dashboard.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 

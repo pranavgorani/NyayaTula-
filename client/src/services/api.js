@@ -50,6 +50,7 @@ export const compliance = {
   runCheck: (productId, declarations) => api.post('/compliance/check', { productId, declarations }),
   getReport: (productId) => api.get(`/compliance/report/${productId}`),
   getAllReports: (params) => api.get('/compliance/reports', { params }),
+  geminiScan: (base64Image, mimeType) => api.post('/compliance/gemini-scan', { base64Image, mimeType }, { timeout: 60000 }),
 };
 
 export const dashboard = {

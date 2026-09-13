@@ -150,9 +150,16 @@ const ComplianceReport = () => {
         logging: false
       });
       const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfWidth = 210; // Standard A4 width in mm
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      // Create PDF with custom height so it fits the entire report on a single long page
+      // preventing text or tables from being awkwardly sliced in half by page breaks.
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: [pdfWidth, pdfHeight > 297 ? pdfHeight : 297]
+      });
 
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       const safeName = (productData?.productName || 'Commodity').replace(/[^a-zA-Z0-9]/g, '_');
@@ -164,6 +171,44 @@ const ComplianceReport = () => {
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleExportCSV = () => {
+    if (!reportData) return;
+    const checks = reportData.checkResults || [];
+    let csv = 'Rule Name,Rule Reference,Severity,Result,Details\n';
+    checks.forEach(c => {
+      csv += `"${c.ruleName}","${c.ruleReference}","${c.severity}","${c.passed ? 'COMPLIANT' : 'VIOLATION'}","${(c.details || '').replace(/"/g, '""')}"\n`;
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeName = (productData?.productName || 'Commodity').replace(/[^a-zA-Z0-9]/g, '_');
+    link.download = `NyayaTula_Compliance_Report_${safeName}_${format(new Date(), 'yyyyMMdd')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('CSV Report exported successfully!');
+  };
+
+  const handleExportWord = () => {
+    if (!reportRef.current) return;
+    const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset='utf-8'><title>Compliance Report</title></head><body>`;
+    const footer = "</body></html>";
+    const sourceHTML = header + reportRef.current.innerHTML + footer;
+    
+    const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
+    const fileDownload = document.createElement("a");
+    document.body.appendChild(fileDownload);
+    fileDownload.href = source;
+    const safeName = (productData?.productName || 'Commodity').replace(/[^a-zA-Z0-9]/g, '_');
+    fileDownload.download = `NyayaTula_Compliance_Report_${safeName}_${format(new Date(), 'yyyyMMdd')}.doc`;
+    fileDownload.click();
+    document.body.removeChild(fileDownload);
+    toast.success('Word Document exported successfully!');
   };
 
   const handleSaveNotes = async () => {
@@ -292,16 +337,46 @@ const ComplianceReport = () => {
             </div>
           </div>
 
-          {/* Commodity Details Section */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <div className="bg-slate-100/70 px-6 py-3 border-b border-slate-200 flex items-center justify-between">
+          {/* Extracted Declarations Card */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                1. Packaged Commodity Description
+                1. Extracted Package Declarations
               </h2>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-primary-100 text-primary-800 uppercase">
                 {productData?.category || 'Commodity'}
               </span>
             </div>
+            
+            {/* AI Findings Display */}
+            {declarations.aiFindings && (
+              <div className="p-5 border-b border-slate-200 bg-slate-50/50">
+                <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-100 text-purple-700">AI</span>
+                  Gemini Vision Inspector Findings
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-3.5 rounded-lg bg-indigo-50 border border-indigo-200">
+                    <p className="text-xs font-bold text-slate-800 uppercase mb-1">Font Size Analysis</p>
+                    <p className="text-sm text-slate-700">{declarations.aiFindings.font_size_compliance_assessment}</p>
+                  </div>
+                  <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200">
+                    <p className="text-xs font-bold text-slate-800 uppercase mb-1">Placement & Anomalies</p>
+                    <p className="text-sm text-slate-700">{declarations.aiFindings.placement_and_anomalies_detected}</p>
+                  </div>
+                  <div className="p-3.5 rounded-lg bg-slate-100 border border-slate-300">
+                    <p className="text-xs font-bold text-slate-800 uppercase mb-1">Readability</p>
+                    <p className="text-sm text-slate-700">{declarations.aiFindings.readability_assessment}</p>
+                  </div>
+                  <div className={`p-3.5 rounded-lg border ${declarations.aiFindings.tampering_detected ? 'bg-danger-50 border-danger-200' : 'bg-success-50 border-success-200'}`}>
+                    <p className="text-xs font-bold text-slate-800 uppercase mb-1">Tampering Check</p>
+                    <p className={`text-sm font-semibold ${declarations.aiFindings.tampering_detected ? 'text-danger-700' : 'text-success-700'}`}>
+                      {declarations.aiFindings.tampering_detected ? '⚠️ Potential tampering or obscuration detected' : '✓ No signs of tampering detected'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-sm">
               <div>

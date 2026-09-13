@@ -191,4 +191,19 @@ router.get('/reports', async (req, res) => {
   }
 });
 
+// === Gemini AI Vision Compliance Scanner ===
+router.post('/gemini-scan', async (req, res) => {
+  try {
+    const { base64Image, mimeType } = req.body;
+    if (!base64Image) {
+      return res.status(400).json({ success: false, message: 'No image provided. Send base64Image in request body.' });
+    }
+    const aiResult = await analyzePackageImage(base64Image, mimeType || 'image/jpeg');
+    res.json({ success: true, data: aiResult });
+  } catch (err) {
+    console.error('Gemini Vision scan error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 export default router;

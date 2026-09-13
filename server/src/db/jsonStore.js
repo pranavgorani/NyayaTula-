@@ -233,8 +233,8 @@ class JsonStore {
 
   save() {
     try {
-      if (fs.existsSync(this.filePath)) {
-        fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+      if (fs.existsSync(DB_FILE)) {
+        fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf8');
       }
     } catch (err) {
       console.warn('Vercel serverless environment detected: Local JSON write skipped. Please connect a MongoDB URI to persist data.');

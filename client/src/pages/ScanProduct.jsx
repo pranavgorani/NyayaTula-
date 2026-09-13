@@ -14,7 +14,13 @@ import {
   Eye,
   ShieldAlert,
   Info,
-  PackageCheck
+  PackageCheck,
+  Brain,
+  Zap,
+  ScanEye,
+  Fingerprint,
+  Type,
+  MapPin
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { COMPLIANCE_RULES, runClientComplianceCheck } from '../services/complianceRules';
@@ -141,6 +147,11 @@ const ScanProduct = () => {
   const [complianceResults, setComplianceResults] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // AI Scanner Mode: 'tesseract' (local) or 'gemini' (cloud AI)
+  const [scanMode, setScanMode] = useState('tesseract');
+  // Gemini AI findings (readability, tampering, violations)
+  const [aiFindings, setAiFindings] = useState(null);
+
   // Handle files
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
@@ -169,6 +180,88 @@ const ScanProduct = () => {
     setCurrentStep(2);
     setIsProcessing(true);
     setProgress(10);
+    setAiFindings(null);
+
+    // ===== GEMINI AI VISION MODE =====
+    if (scanMode === 'gemini') {
+      setOcrStatusText('Connecting to Gemini 2.5 Flash Vision AI...');
+      setProgress(20);
+
+      try {
+        const base64Image = imagePreviews[0]; // Already base64 from FileReader
+        const mimeType = images[0]?.type || 'image/jpeg';
+
+        setOcrStatusText('AI is analyzing packaging declarations, font sizes, and compliance...');
+        setProgress(50);
+
+        const response = await api.compliance.geminiScan(base64Image, mimeType);
+        const aiData = response.data?.data;
+
+        if (!aiData) {
+          throw new Error('Empty response from Gemini AI.');
+        }
+
+        setProgress(90);
+        setOcrStatusText('AI analysis complete! Populating declarations...');
+
+        // Store AI findings for display in Step 4
+        setAiFindings({
+          compliance_status: aiData.compliance_status,
+          missing_declarations: aiData.missing_declarations || [],
+          violations_found: aiData.violations_found || [],
+          readability_assessment: aiData.readability_assessment || 'Not assessed',
+          font_size_compliance_assessment: aiData.font_size_compliance_assessment || 'Not assessed',
+          placement_and_anomalies_detected: aiData.placement_and_anomalies_detected || 'No anomalies detected',
+          tampering_detected: aiData.tampering_or_obscuration_detected || false
+        });
+
+        // Auto-fill form from Gemini's structured output
+        const fill = aiData.auto_fill_data || {};
+        setFormData(prev => ({
+          ...prev,
+          productName: fill.product_name || prev.productName,
+          manufacturerName: fill.manufacturer_name || prev.manufacturerName,
+          manufacturerAddress: fill.manufacturer_address || prev.manufacturerAddress,
+          netQuantity: fill.net_quantity_value != null ? String(fill.net_quantity_value) : prev.netQuantity,
+          netQuantityUnit: fill.net_quantity_unit || prev.netQuantityUnit,
+          mrp: fill.mrp_price != null ? String(fill.mrp_price) : prev.mrp,
+          mrpInclusiveText: fill.mrp_full_text ? /incl/i.test(fill.mrp_full_text) : prev.mrpInclusiveText,
+          mfgDate: fill.date_month && fill.date_year ? `${fill.date_month}/${fill.date_year}` : prev.mfgDate,
+          consumerCarePhone: fill.consumer_care_phone || prev.consumerCarePhone,
+          consumerCareEmail: fill.consumer_care_email || prev.consumerCareEmail
+        }));
+
+        // Build a readable text summary for the Raw OCR box
+        const summaryLines = [
+          fill.product_name && `Product: ${fill.product_name}`,
+          fill.manufacturer_name && `Manufacturer: ${fill.manufacturer_name}`,
+          fill.manufacturer_address && `Address: ${fill.manufacturer_address}`,
+          fill.net_quantity_value && `Net Qty: ${fill.net_quantity_value} ${fill.net_quantity_unit || ''}`,
+          fill.mrp_full_text && `MRP: ${fill.mrp_full_text}`,
+          fill.date_month && `Date: ${fill.date_month}/${fill.date_year}`,
+          fill.consumer_care_phone && `Phone: ${fill.consumer_care_phone}`,
+          fill.consumer_care_email && `Email: ${fill.consumer_care_email}`
+        ].filter(Boolean).join('\n');
+        setExtractedText(summaryLines || 'Gemini AI analysis complete — fields auto-populated.');
+
+        setProgress(100);
+        setTimeout(() => {
+          setIsProcessing(false);
+          setCurrentStep(3);
+          toast.success('🧠 Gemini AI analysis complete! Fields auto-populated.');
+        }, 500);
+
+      } catch (err) {
+        console.error('Gemini scan error:', err);
+        toast.error('Gemini AI scan failed: ' + (err.response?.data?.message || err.message) + '. Falling back to Tesseract OCR.');
+        setScanMode('tesseract');
+        setIsProcessing(false);
+        setCurrentStep(1);
+      }
+      return;
+    }
+
+    // ===== TESSERACT LOCAL OCR MODE =====
     setOcrStatusText('Loading Tesseract OCR model...');
 
     try {
@@ -195,7 +288,6 @@ const ScanProduct = () => {
       const parsed = parseDeclarationsFromText(recognizedText) || {};
 
       // Validate that the image is actually a packaged commodity
-      // Reject any scan that is entirely unrelated to product packaging
       const packageKeywords = [
         'mrp', 'net', 'weight', 'qty', 'quantity', 'manufactured', 'mfg', 'packed', 
         'fssai', 'ingredients', 'batch', 'best before', 'exp', 'mfd', 
@@ -205,11 +297,10 @@ const ScanProduct = () => {
       const textLower = recognizedText.toLowerCase();
       const keywordMatches = packageKeywords.filter(kw => textLower.includes(kw));
 
-      // If the OCR completely failed to extract text, OR it lacks fundamental packaging keywords, REJECT IT
       if (!recognizedText || recognizedText.trim().length < 5 || keywordMatches.length < 1) {
         toast.error('Scan Rejected: Image does not appear to be a valid packaged commodity. No mandatory Legal Metrology keywords detected.');
         setIsProcessing(false);
-        setCurrentStep(1); // Force rejection and return to upload
+        setCurrentStep(1);
         return;
       }
 
@@ -305,7 +396,7 @@ const ScanProduct = () => {
         inspectionLocation: formData.inspectionLocation,
         notes: formData.notes,
         images: imagePreviews,
-        extractedDeclarations: formData,
+        extractedDeclarations: { ...formData, aiFindings },
         complianceStatus: complianceResults?.overallStatus || 'pending',
         violationCount: complianceResults?.failedChecks || 0
       };
@@ -342,6 +433,8 @@ const ScanProduct = () => {
     setImagePreviews([]);
     setExtractedText('');
     setComplianceResults(null);
+    setAiFindings(null);
+    setScanMode('tesseract');
   };
 
   const steps = [
@@ -444,6 +537,54 @@ const ScanProduct = () => {
               </div>
             )}
 
+            {/* AI Scanner Mode Toggle */}
+            <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <ScanEye size={14} /> Select Scanner Engine
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setScanMode('tesseract')}
+                  className={`p-3 rounded-lg border-2 text-left transition-all ${
+                    scanMode === 'tesseract'
+                      ? 'border-primary-500 bg-primary-50 shadow-md'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Zap size={16} className={scanMode === 'tesseract' ? 'text-primary-600' : 'text-slate-400'} />
+                    <span className={`text-sm font-bold ${scanMode === 'tesseract' ? 'text-primary-700' : 'text-slate-700'}`}>
+                      Fast On-Device OCR
+                    </span>
+                  </div>
+                  <p className="text-[0.65rem] text-slate-500 leading-snug">
+                    Tesseract.js WebAssembly engine. Runs locally in your browser. No API key needed.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScanMode('gemini')}
+                  className={`p-3 rounded-lg border-2 text-left transition-all ${
+                    scanMode === 'gemini'
+                      ? 'border-purple-500 bg-purple-50 shadow-md'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Brain size={16} className={scanMode === 'gemini' ? 'text-purple-600' : 'text-slate-400'} />
+                    <span className={`text-sm font-bold ${scanMode === 'gemini' ? 'text-purple-700' : 'text-slate-700'}`}>
+                      Gemini AI Vision
+                    </span>
+                    <span className="text-[0.55rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">AI</span>
+                  </div>
+                  <p className="text-[0.65rem] text-slate-500 leading-snug">
+                    Google Gemini 2.5 Flash. Understands context, checks readability & detects tampering.
+                  </p>
+                </button>
+              </div>
+            </div>
+
             <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4">
               <button
                 type="button"
@@ -456,9 +597,12 @@ const ScanProduct = () => {
                 type="button"
                 onClick={startProcessing}
                 disabled={images.length === 0}
-                className="w-full sm:w-auto px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className={`w-full sm:w-auto px-6 py-2.5 text-white rounded-lg font-semibold shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                  scanMode === 'gemini' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-primary-600 hover:bg-primary-700'
+                }`}
               >
-                <span>Process with OCR AI</span>
+                {scanMode === 'gemini' ? <Brain size={18} /> : <Zap size={18} />}
+                <span>{scanMode === 'gemini' ? 'Analyze with Gemini AI' : 'Process with OCR'}</span>
                 <ArrowRight size={18} />
               </button>
             </div>
@@ -512,7 +656,9 @@ const ScanProduct = () => {
           </div>
 
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Neural OCR Analysis in Progress</h2>
+            <h2 className="text-2xl font-bold text-slate-900">
+            {scanMode === 'gemini' ? 'Gemini AI Vision Analysis' : 'Neural OCR Analysis in Progress'}
+          </h2>
             <p className="text-sm text-slate-500 mt-1">{ocrStatusText}</p>
           </div>
 
@@ -530,15 +676,34 @@ const ScanProduct = () => {
           </div>
 
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-left text-xs text-slate-600 font-mono space-y-1">
-            <p className="text-slate-400 font-bold uppercase tracking-wider text-[0.65rem]">Detection pipeline:</p>
-            <p className="text-success-600">✓ Pre-processing & contrast enhancement</p>
-            <p className="text-success-600">✓ Bounding-box text localization</p>
-            <p className={progress >= 70 ? 'text-success-600' : 'text-slate-400'}>
-              {progress >= 70 ? '✓ Tesseract character recognition' : '⏳ Tesseract character recognition'}
+            <p className="text-slate-400 font-bold uppercase tracking-wider text-[0.65rem]">
+              {scanMode === 'gemini' ? 'AI Vision Pipeline:' : 'Detection pipeline:'}
             </p>
-            <p className={progress >= 90 ? 'text-success-600' : 'text-slate-400'}>
-              {progress >= 90 ? '✓ Legal Metrology Rule 6(1) field parser' : '⏳ Legal Metrology Rule 6(1) field parser'}
-            </p>
+            {scanMode === 'gemini' ? (
+              <>
+                <p className="text-success-600">✓ Image uploaded to Gemini 2.5 Flash</p>
+                <p className={progress >= 40 ? 'text-success-600' : 'text-slate-400'}>
+                  {progress >= 40 ? '✓ Multimodal vision analysis' : '⏳ Multimodal vision analysis'}
+                </p>
+                <p className={progress >= 70 ? 'text-success-600' : 'text-slate-400'}>
+                  {progress >= 70 ? '✓ Declaration extraction & readability check' : '⏳ Declaration extraction & readability check'}
+                </p>
+                <p className={progress >= 90 ? 'text-success-600' : 'text-slate-400'}>
+                  {progress >= 90 ? '✓ Tampering detection & anomaly analysis' : '⏳ Tampering detection & anomaly analysis'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-success-600">✓ Pre-processing & contrast enhancement</p>
+                <p className="text-success-600">✓ Bounding-box text localization</p>
+                <p className={progress >= 70 ? 'text-success-600' : 'text-slate-400'}>
+                  {progress >= 70 ? '✓ Tesseract character recognition' : '⏳ Tesseract character recognition'}
+                </p>
+                <p className={progress >= 90 ? 'text-success-600' : 'text-slate-400'}>
+                  {progress >= 90 ? '✓ Legal Metrology Rule 6(1) field parser' : '⏳ Legal Metrology Rule 6(1) field parser'}
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -924,6 +1089,112 @@ const ScanProduct = () => {
               </button>
             </div>
           </div>
+
+          {/* AI Inspector Findings (Gemini mode only) */}
+          {aiFindings && (
+            <div className="bg-white rounded-2xl shadow-sm border border-purple-100 overflow-hidden">
+              <div className="p-5 border-b border-purple-100 bg-purple-50/50 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center text-white">
+                    <Brain size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-purple-900">AI Inspector Findings</h3>
+                    <p className="text-[0.65rem] text-purple-600">Powered by Google Gemini 2.5 Flash Vision</p>
+                  </div>
+                </div>
+                <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${
+                  aiFindings.compliance_status === 'COMPLIANT'
+                    ? 'bg-success-100 text-success-800'
+                    : 'bg-danger-100 text-danger-800'
+                }`}>
+                  AI: {aiFindings.compliance_status}
+                </span>
+              </div>
+
+              <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Font Size Assessment */}
+                <div className="p-3.5 rounded-lg bg-indigo-50 border border-indigo-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Type size={15} className="text-indigo-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Font Size Analysis</span>
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{aiFindings.font_size_compliance_assessment}</p>
+                </div>
+
+                {/* Placement & Anomalies */}
+                <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <MapPin size={15} className="text-amber-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Placement & Anomalies</span>
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{aiFindings.placement_and_anomalies_detected}</p>
+                </div>
+
+                {/* Readability Assessment */}
+                <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Eye size={15} className="text-blue-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Readability Assessment</span>
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{aiFindings.readability_assessment}</p>
+                </div>
+
+                {/* Tampering Detection */}
+                <div className={`p-3.5 rounded-lg border ${
+                  aiFindings.tampering_detected
+                    ? 'bg-danger-50 border-danger-200'
+                    : 'bg-success-50 border-success-200'
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Fingerprint size={15} className={aiFindings.tampering_detected ? 'text-danger-600' : 'text-success-600'} />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Tampering / Obscuration</span>
+                  </div>
+                  <p className={`text-sm font-semibold ${aiFindings.tampering_detected ? 'text-danger-700' : 'text-success-700'}`}>
+                    {aiFindings.tampering_detected
+                      ? '⚠️ Potential tampering or label obscuration detected!'
+                      : '✓ No signs of tampering or label manipulation detected.'}
+                  </p>
+                </div>
+
+                {/* Missing Declarations */}
+                {aiFindings.missing_declarations.length > 0 && (
+                  <div className="p-3.5 rounded-lg bg-saffron-50 border border-saffron-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle size={15} className="text-saffron-600" />
+                      <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Missing Declarations ({aiFindings.missing_declarations.length})</span>
+                    </div>
+                    <ul className="space-y-1">
+                      {aiFindings.missing_declarations.map((d, i) => (
+                        <li key={i} className="text-xs text-saffron-800 flex items-start gap-1.5">
+                          <span className="text-saffron-500 mt-0.5">•</span>
+                          <span>{d}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Violations Found */}
+                {aiFindings.violations_found.length > 0 && (
+                  <div className="p-3.5 rounded-lg bg-danger-50 border border-danger-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <ShieldAlert size={15} className="text-danger-600" />
+                      <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">AI Violations ({aiFindings.violations_found.length})</span>
+                    </div>
+                    <ul className="space-y-1">
+                      {aiFindings.violations_found.map((v, i) => (
+                        <li key={i} className="text-xs text-danger-800 flex items-start gap-1.5">
+                          <span className="text-danger-500 mt-0.5">•</span>
+                          <span>{v}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Detailed Rule Breakdown Checklist */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
